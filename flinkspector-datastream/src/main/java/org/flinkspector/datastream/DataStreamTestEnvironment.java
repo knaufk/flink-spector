@@ -19,6 +19,7 @@ package org.flinkspector.datastream;
 import com.google.common.base.Preconditions;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.FromElementsFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -31,9 +32,11 @@ import org.flinkspector.core.runtime.OutputVerifier;
 import org.flinkspector.core.runtime.Runner;
 import org.flinkspector.core.trigger.DefaultTestTrigger;
 import org.flinkspector.core.trigger.VerifyFinishedTrigger;
+import org.flinkspector.datastream.functions.DelayingFromStreamRecordsFunction;
 import org.flinkspector.datastream.functions.ParallelFromStreamRecordsFunction;
 import org.flinkspector.datastream.functions.TestSink;
 import org.flinkspector.datastream.input.EventTimeInput;
+import org.flinkspector.datastream.input.ProcessingTimeInput;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -126,8 +129,28 @@ public class DataStreamTestEnvironment extends TestStreamEnvironment {
 	 * @return The data stream representing the given array of elements
 	 */
 	@SafeVarargs
-	public final <OUT> DataStreamSource<OUT> fromElementsWithTimeStamp(StreamRecord<OUT>... data) {
-	    return fromCollectionWithTimestamp(Arrays.asList(data));
+	public final <OUT> DataStreamSource<OUT> fromElementsWithEventTime(StreamRecord<OUT>... data) {
+	    return fromCollectionWithTimestamp(Arrays.asList(data), TimeCharacteristic.EventTime);
+	}
+
+	/**
+	 * Creates a new data stream that contains the given elements. The elements must all be of the same type, for
+	 * example, all of the {@link String} or {@link Integer}.
+	 * <p>
+	 * The framework will try and determine the exact type from the elements. In case of generic elements, it may be
+	 * necessary to manually supply the type information via {@link #fromCollection(java.util.Collection,
+	 * org.apache.flink.api.common.typeinfo.TypeInformation)}.
+	 * <p>
+	 * Note that this operation will result in a non-parallel data stream source, i.e. a data stream source with a
+	 * degree of parallelism one.
+	 *
+	 * @param data  The array of elements to startWith the data stream from.
+	 * @param <OUT> The type of the returned data stream
+	 * @return The data stream representing the given array of elements
+	 */
+	@SafeVarargs
+	public final <OUT> DataStreamSource<OUT> fromElementsWithProcessingTime(StreamRecord<OUT>... data) {
+		return fromCollectionWithTimestamp(Arrays.asList(data), TimeCharacteristic.ProcessingTime);
 	}
 
 	/**
@@ -138,7 +161,18 @@ public class DataStreamTestEnvironment extends TestStreamEnvironment {
 	 * @return The data stream representing the given input.
 	 */
 	public <OUT> DataStreamSource<OUT> fromInput(EventTimeInput<OUT> input) {
-		return fromCollectionWithTimestamp(input.getInput());
+		return fromCollectionWithTimestamp(input.getInput(), TimeCharacteristic.EventTime);
+	}
+
+	/**
+	 * Creates a data stream form the given non-empty {@link EventTimeInput} object.
+	 * The type of the data stream is that of the {@link ProcessingTimeInput}.
+	 * @param input The {@link ProcessingTimeInput} to startWith the data stream from.
+	 * @param <OUT> The generic type of the returned data stream.
+	 * @return The data stream representing the given input.
+	 */
+	public <OUT> DataStreamSource<OUT> fromInput(ProcessingTimeInput<OUT> input) {
+		return fromCollectionWithTimestamp(input.getInput(), TimeCharacteristic.ProcessingTime);
 	}
 
 	/**
@@ -167,7 +201,7 @@ public class DataStreamTestEnvironment extends TestStreamEnvironment {
 	 * @param <OUT> The generic type of the returned data stream.
 	 * @return The data stream representing the given collection
 	 */
-	public <OUT> DataStreamSource<OUT> fromCollectionWithTimestamp(Collection<StreamRecord<OUT>> data) {
+	public <OUT> DataStreamSource<OUT> fromCollectionWithTimestamp(Collection<StreamRecord<OUT>> data,TimeCharacteristic timeCharacteristic) {
 		Preconditions.checkNotNull(data, "Collection must not be null");
 		if (data.isEmpty()) {
 			throw new IllegalArgumentException("Collection must not be empty");
@@ -186,7 +220,7 @@ public class DataStreamTestEnvironment extends TestStreamEnvironment {
 					+ "; please specify the TypeInformation manually via "
 					+ "StreamExecutionEnvironment#fromElements(Collection, TypeInformation)");
 		}
-		return fromCollectionWithTimestamp(data, typeInfo);
+		return fromCollectionWithTimestamp(data, typeInfo, timeCharacteristic);
 	}
 
 	/**
@@ -201,7 +235,7 @@ public class DataStreamTestEnvironment extends TestStreamEnvironment {
 	 * @return The data stream representing the given collection
 	 */
 	public <OUT> DataStreamSource<OUT> fromCollectionWithTimestamp(Collection<StreamRecord<OUT>> data,
-																   TypeInformation<OUT> outType) {
+																   TypeInformation<OUT> outType, TimeCharacteristic timeCharacteristic) {
 		Preconditions.checkNotNull(data, "Collection must not be null");
 
 		TypeInformation<StreamRecord<OUT>> typeInfo;
@@ -217,9 +251,18 @@ public class DataStreamTestEnvironment extends TestStreamEnvironment {
 		// must not have null elements and mixed elements
 		FromElementsFunction.checkCollection(data, typeInfo.getTypeClass());
 
-		SourceFunction<OUT> function;
+		SourceFunction<OUT> function = null;
 		try {
-			function = new ParallelFromStreamRecordsFunction<OUT>(typeInfo.createSerializer(getConfig()), data);
+			switch (timeCharacteristic) {
+				case EventTime:
+					function = new ParallelFromStreamRecordsFunction<OUT>(typeInfo.createSerializer(getConfig()), data);
+					break;
+				case ProcessingTime:
+					function = new DelayingFromStreamRecordsFunction<>(typeInfo.createSerializer(getConfig()), data);
+					break;
+				case IngestionTime:
+					throw new UnsupportedOperationException("Ingestion Time is not supported.");
+			}
 		} catch (IOException e) {
 			throw new RuntimeException(e.getMessage(), e);
 		}

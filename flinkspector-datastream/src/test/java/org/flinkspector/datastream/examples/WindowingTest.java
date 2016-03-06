@@ -64,7 +64,7 @@ public class WindowingTest extends StreamTestBase {
 		 * record and the current record.
 		 */
 		DataStream<Tuple2<Integer, String>> testStream =
-				createTimedTestStreamWith(Tuple2.of(1, "fritz"))
+				createEventTimedTestStreamWith(Tuple2.of(1, "fritz"))
 						.emit(Tuple2.of(1, "hans"), after(15, seconds))
 						//it's possible to generate unsorted input
 						.emit(Tuple2.of(1, "heidi"), before(5, seconds))

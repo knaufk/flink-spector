@@ -29,10 +29,7 @@ import org.flinkspector.core.quantify.OutputMatcherFactory;
 import org.flinkspector.core.runtime.OutputVerifier;
 import org.flinkspector.core.trigger.VerifyFinishedTrigger;
 import org.flinkspector.datastream.functions.TestSink;
-import org.flinkspector.datastream.input.EventTimeInput;
-import org.flinkspector.datastream.input.EventTimeInputBuilder;
-import org.flinkspector.datastream.input.EventTimeSourceBuilder;
-import org.flinkspector.datastream.input.SourceBuilder;
+import org.flinkspector.datastream.input.*;
 import org.flinkspector.datastream.input.time.After;
 import org.flinkspector.datastream.input.time.Before;
 import org.hamcrest.Matcher;
@@ -46,10 +43,21 @@ import java.util.concurrent.TimeUnit;
  */
 public class StreamTestBase {
 
+
 	/**
 	 * Test Environment
 	 */
 	private DataStreamTestEnvironment testEnv;
+
+
+	/**
+	 *
+	 * Expose TimeCharacterisitic to be changed by specific test. Default is TimeCharacteristic.EventTime.
+	 *
+	 */
+	protected TimeCharacteristic getTimeCharacteristic() {
+		return TimeCharacteristic.EventTime;
+	}
 
 	/**
 	 * Creates a new {@link DataStreamTestEnvironment}
@@ -57,7 +65,7 @@ public class StreamTestBase {
 	@org.junit.Before
 	public void initialize() throws Exception {
 		testEnv = DataStreamTestEnvironment.createTestEnvironment(1);
-		testEnv.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+		testEnv.setStreamTimeCharacteristic(getTimeCharacteristic());
 	}
 
 	/**
@@ -90,8 +98,12 @@ public class StreamTestBase {
 	 * @param <OUT>  type of the stream.
 	 * @return {@link EventTimeSourceBuilder} to work with.
 	 */
-	public <OUT> EventTimeSourceBuilder<OUT> createTimedTestStreamWith(OUT record) {
+	public <OUT> EventTimeSourceBuilder<OUT> createEventTimedTestStreamWith(OUT record) {
 		return EventTimeSourceBuilder.createBuilder(record, testEnv);
+	}
+
+	public <OUT> ProcessingTimeSourceBuilder<OUT> createProcessingTimedTestStreamWith(OUT record) {
+		return ProcessingTimeSourceBuilder.createBuilder(record, testEnv);
 	}
 
 
